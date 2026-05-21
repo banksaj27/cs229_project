@@ -15,7 +15,7 @@ image = (
 
 @app.function(
     image=image,
-    gpu="A10G",
+    gpu="A100",
     timeout=3600 * 12,
     volumes={"/root/checkpoints": vol},
 )

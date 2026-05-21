@@ -16,8 +16,8 @@ d_model = 256
 n_heads = 8
 d_ff = 1024
 max_seq_len = 256
-batch_size = 1024
-n_steps = 100000
+batch_size = 512
+n_steps = 20000
 warmup_steps = 500
 lr = 6e-4
 device = "cuda" if torch.cuda.is_available() else "cpu"
@@ -55,11 +55,10 @@ class IGSMDataset(IterableDataset):
 # pad all entries in the batch to the length of the longest one
 def collate(batch):
     all_ids, masked_ids = zip(*batch)
-    max_len = max(len(x) for x in all_ids)
-    all_ids = [x + [PAD_ID] * (max_len - len(x)) for x in all_ids]
-    masked_ids = [x + [-100] * (max_len - len(x)) for x in masked_ids]
+    all_ids = [x + [PAD_ID] * (max_seq_len - len(x)) for x in all_ids]
+    masked_ids = [x + [-100] * (max_seq_len - len(x)) for x in masked_ids]
     return torch.tensor(all_ids), torch.tensor(masked_ids)
-    
+
 def evaluate(model, n_examples=1000, batch_size=256, n_show=5):
     model.eval()
     correct = 0
@@ -103,7 +102,7 @@ def get_lr(step):
 # =========================
 
 # speed up data generation
-loader = DataLoader(IGSMDataset(), batch_size=batch_size, collate_fn=collate, num_workers=2, pin_memory=True)
+loader = DataLoader(IGSMDataset(), batch_size=batch_size, collate_fn=collate, num_workers=8, pin_memory=True)
 data_iter = iter(loader)
 
 print("-------------------------")
