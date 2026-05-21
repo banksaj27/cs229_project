@@ -14,7 +14,7 @@ def generate_one_example(n):
 # tokenization
 # =========================
 
-VOCABULARY = list("0123456789 +=") + ["<PAD>"] + ["<EOS>"]
+VOCABULARY = list("0123456789 +=") + ["<PAD>", "<EOS>"]
 VOCAB_SIZE = len(VOCABULARY)
 id_to_char = {i: c for i, c in enumerate(VOCABULARY)}
 char_to_id = {c: i for i, c in enumerate(VOCABULARY)}

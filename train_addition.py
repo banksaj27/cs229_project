@@ -16,10 +16,10 @@ d_model = 256
 n_heads = 8
 d_ff = 1024
 max_seq_len = 256
-batch_size = 512
-n_steps = 200000
+batch_size = 1024
+n_steps = 100000
 warmup_steps = 500
-lr = 3e-4
+lr = 6e-4
 device = "cuda" if torch.cuda.is_available() else "cpu"
 
 model = Transformer(K, L, VOCAB_SIZE, d_model, n_heads, d_ff, max_seq_len).to(device)
@@ -167,6 +167,7 @@ for step in range(n_steps):
     
     if step % 100 == 0:
         # calculate time remaining
+        # it lowkey doesn't really work but it is what it is
         elapsed = time.time() - start_time
         steps_per_sec = 100 / (time.time() - last_log_time)
         last_log_time = time.time()
@@ -175,14 +176,19 @@ for step in range(n_steps):
         print(f"step {step}: loss={loss.item():.4f}, lr={current_lr:.6f}, {steps_per_sec:.1f} steps/s, eta={hours}h{minutes:02d}m")
     if step == 0:
         continue
-    if step % 1000 == 0:
+    if step % 5000 == 0:
         # eval on 1000 examples each
         for n in [8, 16, 24, 32]:
-            accuracy = evaluate(model, n)
+            accuracy = evaluate(model, n, 1000)
             print(f"EVAL on step {step}: accuracy={accuracy:.3f} for n={n}")
     if step % 10000 == 0:
         torch.save(model.state_dict(), f"/root/checkpoints/checkpoint_{step}.pt")
         print(f"SAVE on step {step}")
+
+# final eval
+for n in [8, 16, 24, 32]:
+    accuracy = evaluate(model, n, 50000)
+    print(f"FINAL EVAL: accuracy={accuracy:.3f} for n={n}")
 
 print("Saving final weights...")
 torch.save(model.state_dict(), "/root/checkpoints/final.pt")
