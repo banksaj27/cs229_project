@@ -9,7 +9,7 @@ vol = modal.Volume.from_name("addition-checkpoints", create_if_missing=True)
 
 image = (
     modal.Image.debian_slim(python_version="3.11")
-    .pip_install("torch", "triton")
+    .pip_install("torch", "triton", "numpy")
     .add_local_dir(".", remote_path="/root/project")
 )
 
