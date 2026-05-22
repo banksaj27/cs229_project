@@ -10,6 +10,9 @@ import sys, time, math
 # setup
 # =========================
 
+n = 5
+k = 2
+
 K = 12
 L = 1
 d_model = 256
@@ -66,7 +69,7 @@ def evaluate(model, n_examples=1000, batch_size=256, n_show=5):
     with torch.no_grad():
         for i in range(0, n_examples, batch_size):
             current_batch = min(batch_size, n_examples - i)
-            examples = [generate_one_example(n=10, k=2) for _ in range(current_batch)]
+            examples = [generate_one_example(n=n, k=k) for _ in range(current_batch)]
             questions, answers = zip(*examples)
             question_ids = [encode(q) for q in questions]
             max_len = max(len(q) for q in question_ids)
