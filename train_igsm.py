@@ -168,7 +168,15 @@ for step in range(n_steps):
         last_log_time = time.time()
         seconds = (n_steps - step) / steps_per_sec
         hours, minutes = int(seconds // 3600), int(seconds % 3600 // 60)
-        print(f"step {step}: loss={loss.item():.4f}, lr={current_lr:.6f}, {steps_per_sec:.1f} steps/s, eta={hours}h{minutes:02d}m")
+        with torch.no_grad():
+            digit_ids = set(encode("0123456"))
+            digit_mask = torch.zeros_like(all_masked_ids, dtype=torch.bool)
+            for d in digit_ids:
+                digit_mask |= (all_masked_ids == d)
+            digit_targets = torch.where(digit_mask, all_masked_ids,
+                                        torch.full_like(all_masked_ids, -100))
+            digit_loss = loss_fn(logits.detach().transpose(1, 2), digit_targets)
+        print(f"step {step}: loss={loss.item():.4f}, digit_loss={digit_loss.item():.4f}, lr={current_lr:.6f}, {steps_per_sec:.1f} steps/s, eta={hours}h{minutes:02d}m")
     if step == 0:
         continue
     if step % 5000 == 0:
