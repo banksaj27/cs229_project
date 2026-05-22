@@ -1,0 +1,11 @@
+.venv/
+*.pt
+*.pth
+*.pkl
+*.pt.gz
+*.pth.gz
+*.pkl.gz
+*.pt.bz2
+*.pth.bz2
+*.pkl.bz2
+*.dylib
