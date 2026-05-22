@@ -1,10 +1,10 @@
 import random
 import torch
 import torch.nn as nn
-from igsm import generate_one_example, encode, decode, PAD_ID, VOCAB_SIZE
-from model import Transformer
+from igsm import generate_one_example, encode, decode, PAD_ID, VOCAB_SIZE, char_to_id
 from torch.utils.data import IterableDataset, DataLoader
 import sys, time, math
+from model import Transformer
 
 # =========================
 # setup
@@ -17,7 +17,7 @@ n_heads = 8
 d_ff = 1024
 max_seq_len = 256
 batch_size = 512
-n_steps = 20000
+n_steps = 200000
 warmup_steps = 500
 lr = 6e-4
 device = "cuda" if torch.cuda.is_available() else "cpu"
@@ -37,56 +37,83 @@ sys.stdout.reconfigure(line_buffering=True)
 torch.backends.cuda.matmul.allow_tf32 = True
 torch.backends.cudnn.allow_tf32 = True
 
+
 # =========================
 # helpers
 # =========================
 
 class IGSMDataset(IterableDataset):
     def __iter__(self):
+        info = torch.utils.data.get_worker_info()
+        if info is not None:
+            random.seed(info.seed % 2**32)
         while True:
             for _ in range(batch_size):
-                question, answer = generate_one_example(n=10, k=2)
-                question_ids = encode(question)
-                answer_ids = encode(answer)
-                all_ids = question_ids + answer_ids
-                masked_ids = [-100] * (len(question_ids) - 1) + answer_ids
+                problem, cot, _ = generate_one_example(n=8, k=4)
+                problem_ids = encode(problem)
+                cot_ids = encode(cot)
+                all_ids = problem_ids + cot_ids
+                # supervise every token of the CoT trace, nothing in the problem
+                masked_ids = [-100] * (len(problem_ids) - 1) + cot_ids
                 yield all_ids, masked_ids
 
-# pad all entries in the batch to the length of the longest one
 def collate(batch):
     all_ids, masked_ids = zip(*batch)
-    all_ids = [x + [PAD_ID] * (max_seq_len - len(x)) for x in all_ids]
-    masked_ids = [x + [-100] * (max_seq_len - len(x)) for x in masked_ids]
+    batch_max = min(max(len(x) for x in all_ids), max_seq_len)
+    all_ids = [x + [PAD_ID] * (batch_max - len(x)) for x in all_ids]
+    masked_ids = [x + [-100] * (batch_max - len(x)) for x in masked_ids]
     return torch.tensor(all_ids), torch.tensor(masked_ids)
 
 def evaluate(model, n_examples=1000, batch_size=256, n_show=5):
     model.eval()
-    correct = 0
-    shown = 0
+    correct, shown = 0, 0
+    EQ_ID = char_to_id["="]
+    PERIOD_ID = char_to_id["."]
     with torch.no_grad():
         for i in range(0, n_examples, batch_size):
             current_batch = min(batch_size, n_examples - i)
-            examples = [generate_one_example(n=10, k=2) for _ in range(current_batch)]
-            questions, answers = zip(*examples)
-            question_ids = [encode(q) for q in questions]
-            max_len = max(len(q) for q in question_ids)
-            question_ids = [q + [PAD_ID] * (max_len - len(q)) for q in question_ids]
-            question_ids = torch.tensor(question_ids, device=device)
+            examples = [generate_one_example(n=8, k=4) for _ in range(current_batch)]
+            problems, _, answers = zip(*examples)
 
-            # answer is always 1 digit
-            logits = model(question_ids)
-            next_tokens = logits[:, -1, :].argmax(dim=-1, keepdim=True)
-            question_ids = torch.cat([question_ids, next_tokens], dim=1)
+            problem_ids = [encode(p) for p in problems]
+            n_vars = 8
+            seqs = [ids[:] for ids in problem_ids]
+            done = [False] * current_batch
+            periods_seen = [0] * current_batch
+            max_new = 80
 
-            for j, answer in enumerate(answers):
-                pred_ids = question_ids[j, max_len:].tolist()
-                pred_ids = [t for t in pred_ids if t != PAD_ID]
-                predicted = decode(pred_ids)
-                if predicted == answer:
+            for _ in range(max_new):
+                if all(done):
+                    break
+                batch_max = max(len(s) for s in seqs)
+                padded = [s + [PAD_ID] * (batch_max - len(s)) for s in seqs]
+                input_ids = torch.tensor(padded, device=device)
+                logits = model(input_ids)
+                for j in range(current_batch):
+                    if done[j]:
+                        continue
+                    pos = len(seqs[j]) - 1
+                    next_tok = logits[j, pos, :].argmax().item()
+                    seqs[j].append(next_tok)
+                    if next_tok == PERIOD_ID:
+                        periods_seen[j] += 1
+                    if periods_seen[j] == n_vars:
+                        done[j] = True
+
+            # do one batched forward pass after generation
+            batch_max = max(len(s) for s in seqs)
+            padded = [s + [PAD_ID] * (batch_max - len(s)) for s in seqs]
+            input_ids = torch.tensor(padded, device=device)
+
+            for j in range(current_batch):
+                if not done[j]:
+                    continue
+                predicted = decode([seqs[j][-2]])  # -1 is ".", -2 is the digit
+                if predicted == answers[j]:
                     correct += 1
                 if shown < n_show:
-                    status = f"{GREEN}[CORRECT]{RESET}" if predicted == answer else f"{RED}[FAIL]{RESET}"
-                    print(f"  {status} {questions[j]} {predicted} (correct: {answer})")
+                    status = f"{GREEN}[CORRECT]{RESET}" if predicted == answers[j] else f"{RED}[FAIL]{RESET}"
+                    print(f"  {status} {problems[j]} → ...{predicted} (correct: {answers[j]})")
                     shown += 1
     return correct / n_examples
 
@@ -102,7 +129,7 @@ def get_lr(step):
 # =========================
 
 # speed up data generation
-loader = DataLoader(IGSMDataset(), batch_size=batch_size, collate_fn=collate, num_workers=8, pin_memory=True)
+loader = DataLoader(IGSMDataset(), batch_size=batch_size, collate_fn=collate, num_workers=2, pin_memory=True)
 data_iter = iter(loader)
 
 print("-------------------------")

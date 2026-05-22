@@ -47,22 +47,25 @@ def assign_computed(var_names, k, values, formulas, mod=7):
     
     return values, formulas
 
-# 4. write problem statement and answer
-def write_problem(var_names, formulas, query):
-    shuffled = var_names[:]
-    random.shuffle(shuffled)
-    equations = [f"{v} := {formulas[v]}" for v in shuffled]
-    return ". ".join(equations) + f". {query}?"
-
+def write_problem(var_names, formulas, query, values, mod=7):
+    equations = [f"{v} := {formulas[v]} = {values[v]}" for v in var_names]
+    return ". ".join(equations) + "."
 # full pipeline
 def generate_one_example(n, k, mod=7):
     var_names = assign_var_names(n)
     values, formulas = assign_constants(var_names, k)
     values, formulas = assign_computed(var_names, k, values, formulas)
     query = var_names[-1]
-    answer = values[query]
-    problem = write_problem(var_names, formulas, query)
-    return problem, str(answer)
+
+    # input: problem only, no values revealed
+    problem = ". ".join(f"{v} := {formulas[v]}" for v in var_names)
+    problem += f". {query}?"
+
+    # CoT trace: every variable resolved in topological order (already sorted)
+    cot = " " + ". ".join(f"{v} = {values[v]}" for v in var_names) + "."
+
+    answer = str(values[query])
+    return problem, cot, answer
 
 # =========================
 # tokenization
@@ -73,6 +76,16 @@ VOCAB_SIZE = len(VOCABULARY)
 id_to_char = {i: c for i, c in enumerate(VOCABULARY)}
 char_to_id = {c: i for i, c in enumerate(VOCABULARY)}
 PAD_ID = char_to_id["<PAD>"]
+
+EQ_ID = char_to_id["="]
+SPACE_ID = char_to_id[" "]
+
+def make_mask(ids):
+    masked = [-100] * len(ids)
+    for i in range(2, len(ids)):
+        if ids[i-2] == EQ_ID and ids[i-1] == SPACE_ID:
+            masked[i] = ids[i]
+    return masked
 
 def encode(s):
     return [char_to_id[c] for c in s]

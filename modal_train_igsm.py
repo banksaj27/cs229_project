@@ -24,5 +24,10 @@ def train():
     subprocess.run(["python", "/root/project/train_igsm.py"], check=True)
 
 @app.local_entrypoint()
-def main():
-    train.remote()
+def main(detach: bool = False):
+    call = train.spawn()
+    print(f"Training job spawned: {call.object_id}")
+    if detach:
+        print("Detached — job keeps running after you disconnect. Track it in the Modal dashboard.")
+        return
+    call.get()
