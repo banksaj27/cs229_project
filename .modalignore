@@ -1,0 +1,10 @@
+# .modalignore
+venv/
+.venv/
+__pycache__/
+*.pyc
+.git/
+.gitignore
+.tmp/
+torchinductor_root/
+checkpoints/
