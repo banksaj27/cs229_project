@@ -1,94 +1,150 @@
 import random
 
-letters = list("ABCDEFGHIJKLMNOPQRSTUVWXYZ")
+LETTERS = list("ABCDEFGHIJKLMNOPQRSTUVWXYZ")
 
 # =========================
 # generation
 # =========================
 
-# 1. choose variable names
-def assign_var_names(n):
-    return random.sample(letters, n)
+def generate_one_example(mod=23, n_vars_range=(10, 14), max_len=750):
+    lo, hi = n_vars_range
 
-# 2. make some of them constants
-def assign_constants(var_names, k, mod=7):
+    # ── 1. entity hierarchy (4 levels, non-overlapping letters) ──
+    # level sizes 2-3 each → 8-12 letters, always fits in 26
+    pool = LETTERS[:]
+    random.shuffle(pool)
+    idx = 0
+    levels = []
+    for _ in range(4):
+        size = random.randint(2, 3)
+        levels.append(pool[idx:idx + size])
+        idx += size
+
+    # ── 2. structure graph: edges between adjacent levels ──
+    all_edges = []
+    for lvl in range(3):
+        for p in levels[lvl]:
+            for c in levels[lvl + 1]:
+                all_edges.append((p, c))
+
+    # with 2-3 entities per level, we get 4-9 edges per pair of levels
+    # and 12-27 total edges, so sampling 8-12 always works
+    n_target = random.randint(lo, min(hi, len(all_edges)))
+    random.shuffle(all_edges)
+    edges = all_edges[:n_target]
+    var_names = [f"{p}#{c}" for p, c in edges]
+    n = len(var_names)
+
+    # ── 3. dependency DAG (depth <= 4) ──
+    random.shuffle(var_names)
+    n_constants = max(1, n // 4)
+
+    depths = {}
+    dependencies = {}
     values = {}
     formulas = {}
-    for i in range(k):
-        val = random.randint(1, mod - 1)
-        values[var_names[i]] = val
-        formulas[var_names[i]] = str(val)
-    return values, formulas
 
-# 3. make the rest of them depend on each other in a DAG
-def assign_computed(var_names, k, values, formulas, mod=7):
-    for i in range(k, len(var_names)):
+    # constants (depth 0)
+    for i in range(n_constants):
         v = var_names[i]
-        available = var_names[:i]
-        dependencies = random.sample(available, random.randint(1, min(3, len(available))))
-        
+        depths[v] = 0
+        dependencies[v] = []
+        values[v] = random.randint(1, mod - 1)
+        formulas[v] = str(values[v])
+
+    # computed variables: assign depth 1-4, sort by depth, build formulas
+    computed = var_names[n_constants:]
+    for v in computed:
+        depths[v] = random.randint(1, 4)
+    computed.sort(key=lambda v: depths[v])
+
+    for v in computed:
+        d = depths[v]
+        available = [u for u in var_names if u in values and depths[u] < d]
+
+        if not available:
+            # no predecessors at lower depth — bump to depth 1, depend on a constant
+            constants = [u for u in var_names if depths[u] == 0]
+            depths[v] = 1
+            deps = random.sample(constants, min(random.randint(1, 3), len(constants)))
+        else:
+            n_deps = random.randint(1, min(3, len(available)))
+            deps = random.sample(available, n_deps)
+
+        dependencies[v] = deps
+
         terms = []
         val = 0
-        for j, d in enumerate(dependencies):
-            coefficient = random.choice([1, 1, 2, 3])
-            term_val = coefficient * values[d]
-            
+        for j, dep in enumerate(deps):
+            coeff = random.choice([1, 1, 2, 3])
+            term_val = coeff * values[dep]
             if j == 0:
-                terms.append(f"{coefficient} * {d}" if coefficient > 1 else d)
+                terms.append(f"{coeff} * {dep}" if coeff > 1 else dep)
                 val += term_val
             else:
                 op = random.choice(["+", "-"])
                 terms.append(op)
-                terms.append(f"{coefficient} * {d}" if coefficient > 1 else d)
+                terms.append(f"{coeff} * {dep}" if coeff > 1 else dep)
                 val = val + term_val if op == "+" else val - term_val
-        
+
         values[v] = val % mod
         formulas[v] = " ".join(terms)
-    
-    return values, formulas
 
-def write_problem(var_names, formulas, query, values, mod=7):
-    equations = [f"{v} := {formulas[v]} = {values[v]}" for v in var_names]
-    return ". ".join(equations) + "."
-# full pipeline
-def generate_one_example(n, k, mod=7):
-    var_names = assign_var_names(n)
-    values, formulas = assign_constants(var_names, k)
-    values, formulas = assign_computed(var_names, k, values, formulas)
-    query = var_names[-1]
+    # topological order (by depth, stable within same depth)
+    topo = sorted(var_names, key=lambda v: depths[v])
 
-    # input: problem only, no values revealed
-    problem = ". ".join(f"{v} := {formulas[v]}" for v in var_names)
+    # ── 4. query at max depth ──
+    max_d = max(depths.values())
+    query = random.choice([v for v in var_names if depths[v] == max_d])
+
+    # ── 5. ancestors of query ──
+    needed = set()
+    stack = [query]
+    while stack:
+        cur = stack.pop()
+        if cur in needed:
+            continue
+        needed.add(cur)
+        for dep in dependencies.get(cur, []):
+            stack.append(dep)
+    ancestors = [u for u in topo if u in needed]
+
+    # ── 6. format (matches paper Table 2) ──
+    # problem: V := FORMULA (scrambled order)
+    shuffled = var_names[:]
+    random.shuffle(shuffled)
+    problem = ". ".join(f"{v} := {formulas[v]}" for v in shuffled)
     problem += f". {query}?"
 
-    # CoT trace: every variable resolved in topological order (already sorted)
-    cot = " " + ". ".join(f"{v} = {values[v]}" for v in var_names) + "."
+    # CoT: V = FORMULA. => V = VALUE. (topological, ancestors only)
+    cot_steps = []
+    for v in ancestors:
+        cot_steps.append(f"{v} = {formulas[v]}. => {v} = {values[v]}")
+    cot = " " + ". ".join(cot_steps) + "."
 
     answer = str(values[query])
+
+    # if too long, retry
+    if len(encode(problem + cot)) > max_len:
+        return generate_one_example(mod, n_vars_range, max_len)
+
     return problem, cot, answer
+
 
 # =========================
 # tokenization
 # =========================
 
-VOCABULARY = list("ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456 :=+-*.?") + ["<PAD>"]
+VOCABULARY = list("ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789 =+-*.?>#:") + ["<PAD>"]
 VOCAB_SIZE = len(VOCABULARY)
 id_to_char = {i: c for i, c in enumerate(VOCABULARY)}
 char_to_id = {c: i for i, c in enumerate(VOCABULARY)}
 PAD_ID = char_to_id["<PAD>"]
 
-EQ_ID = char_to_id["="]
-SPACE_ID = char_to_id[" "]
-
-def make_mask(ids):
-    masked = [-100] * len(ids)
-    for i in range(2, len(ids)):
-        if ids[i-2] == EQ_ID and ids[i-1] == SPACE_ID:
-            masked[i] = ids[i]
-    return masked
 
 def encode(s):
     return [char_to_id[c] for c in s]
+
 
 def decode(ids):
     return "".join(id_to_char[i] for i in ids if i != PAD_ID)
