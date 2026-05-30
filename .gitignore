@@ -2,3 +2,5 @@ checkpoints/
 __pycache__/
 *.pt
 *.pyc
+.DS_Store
+.modal.toml
